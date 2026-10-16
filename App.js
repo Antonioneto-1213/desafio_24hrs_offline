@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, SafeAreaView, ScrollView, Modal } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 
 const Stack = createNativeStackNavigator();
+const Tab = createBottomTabNavigator();
 
 // --- ECRÃ 1: LOGIN ---
 function LoginScreen({ navigation }) {
@@ -77,7 +79,7 @@ function OnboardingScreen({ navigation }) {
 
         <TouchableOpacity 
           style={[styles.primaryButton, { marginTop: 40, opacity: isReady ? 1 : 0.5 }]} 
-          onPress={() => isReady && navigation.navigate('Dashboard', { mascot })}
+          onPress={() => isReady && navigation.navigate('MainTab', { mascot })}
           activeOpacity={isReady ? 0.8 : 1}
         >
           <Text style={styles.primaryButtonText}>Confirmar e Começar</Text>
@@ -87,13 +89,12 @@ function OnboardingScreen({ navigation }) {
   );
 }
 
-// --- ECRÃ 3: DASHBOARD PRINCIPAL & DESAFIOS ---
-function DashboardScreen({ route }) {
+// --- ECRÃ 3A: DESAFIOS & DESINTOXICAÇÃO (TAB 1) ---
+function ChallengesTab({ route }) {
   const mascotType = route.params?.mascot || 'plant';
   const mascotIcon = mascotType === 'plant' ? '🌿' : '🦉';
   const mascotName = mascotType === 'plant' ? 'Sua Planta do Foco' : 'Sua Coruja do Foco';
 
-  // Estados dos desafios
   const [activeChallenge, setActiveChallenge] = useState(null);
   const [timeLeft, setTimeLeft] = useState(0);
   const [showReflectionModal, setShowReflectionModal] = useState(false);
@@ -105,7 +106,6 @@ function DashboardScreen({ route }) {
     { id: '3', title: '24h Offline Completo', duration: 86400, level: 'Difícil', desc: 'Um dia inteiro de reconexão real' }
   ];
 
-  // Efeito para o temporizador do desafio
   useEffect(() => {
     let interval = null;
     if (activeChallenge && timeLeft > 0) {
@@ -119,7 +119,6 @@ function DashboardScreen({ route }) {
     return () => clearInterval(interval);
   }, [activeChallenge, timeLeft]);
 
-  // Efeito para a Pausa de Reflexão (5 segundos)
   useEffect(() => {
     let interval = null;
     if (showReflectionModal && reflectionTimer > 0) {
@@ -157,7 +156,6 @@ function DashboardScreen({ route }) {
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <Text style={styles.title}>Seu Dashboard Offline</Text>
 
-        {/* Card do Guardião */}
         <View style={styles.guardianCard}>
           <Text style={styles.guardianIcon}>{mascotIcon}</Text>
           <View>
@@ -166,7 +164,6 @@ function DashboardScreen({ route }) {
           </View>
         </View>
 
-        {/* Lista/Catálogo de Desafios */}
         <Text style={styles.sectionLabel}>Catálogo de Desafios</Text>
         {challenges.map((c) => (
           <View key={c.id} style={styles.challengeCard}>
@@ -188,7 +185,6 @@ function DashboardScreen({ route }) {
           <Text style={styles.timerText}>{formatTime(timeLeft)}</Text>
           <Text style={styles.subtitle}>Mantenha o foco. O seu guardião está crescendo!</Text>
 
-          {/* Sugestões Analógicas */}
           <View style={styles.analogBox}>
             <Text style={styles.analogTitle}>💡 Sugestão para o mundo real:</Text>
             <Text style={styles.analogText}>• Vá ler um livro físico</Text>
@@ -202,7 +198,7 @@ function DashboardScreen({ route }) {
         </SafeAreaView>
       </Modal>
 
-      {/* MODAL PAUSA DE REFLEXÃO (5 SEGUNDOS) */}
+      {/* MODAL PAUSA DE REFLEXÃO */}
       <Modal visible={showReflectionModal} transparent animationType="fade">
         <View style={styles.overlay}>
           <View style={styles.reflectionCard}>
@@ -237,14 +233,95 @@ function DashboardScreen({ route }) {
   );
 }
 
-// --- CONFIGURAÇÃO DE ROTAS ---
+// --- ECRÃ 3B: DICAS DE SAÚDE & EDUCAÇÃO (TAB 2) ---
+function HealthTab() {
+  const tips = [
+    {
+      id: '1',
+      icon: '👁️',
+      title: 'A Regra 20-20-20',
+      description: 'A cada 20 minutos olhando para a tela, olhe para algo a 6 metros (20 pés) de distância por pelo menos 20 segundos. Isso previne a fadiga ocular.'
+    },
+    {
+      id: '2',
+      icon: '🌙',
+      title: 'Luz Azul e Sono',
+      description: 'A luz azul emitida pelas telas inibe a produção de melatonina, o hormônio do sono. Evite telas 1 hora antes de dormir para um descanso profundo.'
+    },
+    {
+      id: '3',
+      icon: '🧠',
+      title: 'Desintoxicação de Dopamina',
+      description: 'Notificações constantes geram picos rápidos de dopamina, viciando o cérebro. Momentos offline ajudam a restaurar seu foco e atenção natural.'
+    },
+    {
+      id: '4',
+      icon: '🧘',
+      title: 'Postura e Respiração',
+      description: 'A "síndrome do pescoço de texto" inclina a cabeça e sobrecarrega a coluna. Faça pausas para alongar o pescoço e respirar fundo.'
+    }
+  ];
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <Text style={styles.title}>Saúde & Conscientização</Text>
+        <Text style={styles.subtitle}>Pequenos conhecimentos para proteger sua mente e corpo.</Text>
+
+        {tips.map((item) => (
+          <View key={item.id} style={styles.healthCard}>
+            <View style={styles.healthHeader}>
+              <Text style={styles.healthIcon}>{item.icon}</Text>
+              <Text style={styles.healthTitle}>{item.title}</Text>
+            </View>
+            <Text style={styles.healthDesc}>{item.description}</Text>
+          </View>
+        ))}
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+// --- NAVEGAÇÃO DE TABS ---
+function MainTabNavigator({ route }) {
+  const mascot = route.params?.mascot;
+
+  return (
+    <Tab.Navigator 
+      screenOptions={{ 
+        headerShown: false,
+        tabBarActiveTintColor: '#4A5D4E',
+        tabBarInactiveTintColor: '#8A9285',
+        tabBarStyle: { backgroundColor: '#FFFFFF', paddingBottom: 6, paddingTop: 6, height: 60 }
+      }}
+    >
+      <Tab.Screen 
+        name="Desafios" 
+        component={ChallengesTab} 
+        initialParams={{ mascot }}
+        options={{
+          tabBarIcon: ({ color }) => <Text style={{ fontSize: 20, color }}>🎯</Text>
+        }}
+      />
+      <Tab.Screen 
+        name="Dicas de Saúde" 
+        component={HealthTab} 
+        options={{
+          tabBarIcon: ({ color }) => <Text style={{ fontSize: 20, color }}>💡</Text>
+        }}
+      />
+    </Tab.Navigator>
+  );
+}
+
+// --- CONFIGURAÇÃO DE ROTAS RAIZ ---
 export default function App() {
   return (
     <NavigationContainer>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         <Stack.Screen name="Login" component={LoginScreen} />
         <Stack.Screen name="Onboarding" component={OnboardingScreen} />
-        <Stack.Screen name="Dashboard" component={DashboardScreen} />
+        <Stack.Screen name="MainTab" component={MainTabNavigator} />
       </Stack.Navigator>
     </NavigationContainer>
   );
@@ -304,4 +381,11 @@ const styles = StyleSheet.create({
   reflectionTimer: { fontSize: 36, fontWeight: '700', color: '#2C352E', marginBottom: 8 },
   reflectionTitle: { fontSize: 18, fontWeight: '700', color: '#2C352E', marginBottom: 8 },
   reflectionSubtitle: { fontSize: 13, color: '#6B7260', textAlign: 'center', lineHeight: 18 },
+
+  // Cartões da Tab de Saúde
+  healthCard: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 18, borderWidth: 1, borderColor: '#E2E8E0', marginBottom: 14 },
+  healthHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
+  healthIcon: { fontSize: 24 },
+  healthTitle: { fontSize: 16, fontWeight: '600', color: '#2C352E' },
+  healthDesc: { fontSize: 13, color: '#6B7260', lineHeight: 18 }
 });
