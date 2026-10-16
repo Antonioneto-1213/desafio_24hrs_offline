@@ -1,27 +1,118 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, SafeAreaView, ScrollView, Modal } from 'react-native';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ScrollView, Modal, Alert } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
-// --- ECRÃ 1: LOGIN ---
+// --- ECRÃ 1: LOGIN / REGISTO COM UTILIZADOR E SENHA ---
 function LoginScreen({ navigation }) {
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+
+  // Carregar dados salvos ao iniciar (se já existir conta)
+  useEffect(() => {
+    checkAutoLogin();
+  }, []);
+
+  const checkAutoLogin = async () => {
+    try {
+      const userSession = await AsyncStorage.getItem('@user_session');
+      if (userSession) {
+        navigation.replace('MainTab', { username: JSON.parse(userSession).username });
+      }
+    } catch (e) {
+      console.log('Erro ao ler sessão', e);
+    }
+  };
+
+  const handleAuth = async () => {
+    if (!username.trim() || !password.trim()) {
+      Alert.alert('Atenção', 'Por favor, preencha o nome de utilizador e a senha.');
+      return;
+    }
+
+    if (password.length < 4) {
+      Alert.alert('Atenção', 'A senha deve ter pelo menos 4 caracteres.');
+      return;
+    }
+
+    try {
+      if (isRegistering) {
+        // Registar utilizador
+        const userData = { username, password };
+        await AsyncStorage.setItem('@user_credentials', JSON.stringify(userData));
+        await AsyncStorage.setItem('@user_session', JSON.stringify({ username }));
+        Alert.alert('Sucesso', 'Conta criada com sucesso!');
+        navigation.replace('Onboarding');
+      } else {
+        // Fazer Login
+        const storedCredentials = await AsyncStorage.getItem('@user_credentials');
+        if (storedCredentials) {
+          const { username: savedUser, password: savedPassword } = JSON.parse(storedCredentials);
+          if (username === savedUser && password === savedPassword) {
+            await AsyncStorage.setItem('@user_session', JSON.stringify({ username }));
+            navigation.replace('MainTab', { username });
+          } else {
+            Alert.alert('Erro', 'Nome de utilizador ou senha incorretos.');
+          }
+        } else {
+          Alert.alert('Conta não encontrada', 'Nenhum utilizador registado neste dispositivo. Alterne para "Criar Conta".');
+        }
+      }
+    } catch (e) {
+      Alert.alert('Erro', 'Ocorreu um erro ao processar os dados.');
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
         <View style={styles.iconContainer}><Text style={styles.iconText}>🌳</Text></View>
         <Text style={styles.title}>Desafio 24h Offline</Text>
-        <Text style={styles.subtitle}>Desconecte-se do digital e reconecte-se com o real.</Text>
+        <Text style={styles.subtitle}>
+          {isRegistering ? 'Crie a sua conta para começar' : 'Entre com a sua conta'}
+        </Text>
 
-        <View style={styles.buttonGroup}>
+        {/* Formulário de Autenticação */}
+        <View style={styles.formGroup}>
+          <Text style={styles.inputLabel}>Nome de Utilizador</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Ex: antonioneto"
+            placeholderTextColor="#8A9285"
+            value={username}
+            onChangeText={setUsername}
+            autoCapitalize="none"
+          />
+
+          <Text style={styles.inputLabel}>Senha</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="••••••••"
+            placeholderTextColor="#8A9285"
+            secureTextEntry
+            value={password}
+            onChangeText={setPassword}
+          />
+
+          <TouchableOpacity style={styles.primaryButton} onPress={handleAuth}>
+            <Text style={styles.primaryButtonText}>
+              {isRegistering ? 'Criar Conta e Entrar' : 'Entrar'}
+            </Text>
+          </TouchableOpacity>
+
           <TouchableOpacity 
-            style={styles.primaryButton} 
-            onPress={() => navigation.navigate('Onboarding')}
+            style={{ marginTop: 12, alignItems: 'center' }} 
+            onPress={() => setIsRegistering(!isRegistering)}
           >
-            <Text style={styles.primaryButtonText}>Entrar com Email</Text>
+            <Text style={{ color: '#4A5D4E', fontSize: 14, fontWeight: '500' }}>
+              {isRegistering ? 'Já tem conta? Faça Login' : 'Não tem conta? Criar Conta'}
+            </Text>
           </TouchableOpacity>
         </View>
 
@@ -43,6 +134,13 @@ function OnboardingScreen({ navigation }) {
   ];
 
   const isReady = screenTime && mascot;
+
+  const handleFinishOnboarding = async () => {
+    if (isReady) {
+      await AsyncStorage.setItem('@user_mascot', mascot);
+      navigation.replace('MainTab');
+    }
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -79,7 +177,7 @@ function OnboardingScreen({ navigation }) {
 
         <TouchableOpacity 
           style={[styles.primaryButton, { marginTop: 40, opacity: isReady ? 1 : 0.5 }]} 
-          onPress={() => isReady && navigation.navigate('MainTab', { mascot })}
+          onPress={handleFinishOnboarding}
           activeOpacity={isReady ? 0.8 : 1}
         >
           <Text style={styles.primaryButtonText}>Confirmar e Começar</Text>
@@ -89,16 +187,33 @@ function OnboardingScreen({ navigation }) {
   );
 }
 
-// --- ECRÃ 3A: DESAFIOS & DESINTOXICAÇÃO (TAB 1) ---
-function ChallengesTab({ route }) {
-  const mascotType = route.params?.mascot || 'plant';
-  const mascotIcon = mascotType === 'plant' ? '🌿' : '🦉';
-  const mascotName = mascotType === 'plant' ? 'Sua Planta do Foco' : 'Sua Coruja do Foco';
-
+// --- ECRÃ 3A: DESAFIOS (TAB 1) ---
+function ChallengesTab({ navigation }) {
+  const [mascotType, setMascotType] = useState('plant');
+  const [username, setUsername] = useState('Utilizador');
   const [activeChallenge, setActiveChallenge] = useState(null);
   const [timeLeft, setTimeLeft] = useState(0);
   const [showReflectionModal, setShowReflectionModal] = useState(false);
   const [reflectionTimer, setReflectionTimer] = useState(5);
+
+  useEffect(() => {
+    loadUserData();
+  }, []);
+
+  const loadUserData = async () => {
+    const savedMascot = await AsyncStorage.getItem('@user_mascot');
+    const userSession = await AsyncStorage.getItem('@user_session');
+    if (savedMascot) setMascotType(savedMascot);
+    if (userSession) setUsername(JSON.parse(userSession).username);
+  };
+
+  const handleLogout = async () => {
+    await AsyncStorage.removeItem('@user_session');
+    navigation.replace('Login');
+  };
+
+  const mascotIcon = mascotType === 'plant' ? '🌿' : '🦉';
+  const mascotName = mascotType === 'plant' ? 'Sua Planta do Foco' : 'Sua Coruja do Foco';
 
   const challenges = [
     { id: '1', title: 'Fácil (1h)', duration: 3600, level: 'Fácil', desc: '1h longe das redes sociais' },
@@ -109,11 +224,9 @@ function ChallengesTab({ route }) {
   useEffect(() => {
     let interval = null;
     if (activeChallenge && timeLeft > 0) {
-      interval = setInterval(() => {
-        setTimeLeft((prev) => prev - 1);
-      }, 1000);
+      interval = setInterval(() => setTimeLeft((prev) => prev - 1), 1000);
     } else if (timeLeft === 0 && activeChallenge) {
-      alert('Parabéns! Desafio concluído com sucesso!');
+      Alert.alert('Parabéns!', 'Desafio concluído com sucesso!');
       setActiveChallenge(null);
     }
     return () => clearInterval(interval);
@@ -122,9 +235,7 @@ function ChallengesTab({ route }) {
   useEffect(() => {
     let interval = null;
     if (showReflectionModal && reflectionTimer > 0) {
-      interval = setInterval(() => {
-        setReflectionTimer((prev) => prev - 1);
-      }, 1000);
+      interval = setInterval(() => setReflectionTimer((prev) => prev - 1), 1000);
     }
     return () => clearInterval(interval);
   }, [showReflectionModal, reflectionTimer]);
@@ -154,7 +265,12 @@ function ChallengesTab({ route }) {
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        <Text style={styles.title}>Seu Dashboard Offline</Text>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <Text style={styles.title}>Olá, {username} 👋</Text>
+          <TouchableOpacity onPress={handleLogout}>
+            <Text style={{ color: '#E28B8B', fontWeight: '600', fontSize: 13 }}>Sair</Text>
+          </TouchableOpacity>
+        </View>
 
         <View style={styles.guardianCard}>
           <Text style={styles.guardianIcon}>{mascotIcon}</Text>
@@ -233,33 +349,13 @@ function ChallengesTab({ route }) {
   );
 }
 
-// --- ECRÃ 3B: DICAS DE SAÚDE & EDUCAÇÃO (TAB 2) ---
+// --- ECRÃ 3B: DICAS DE SAÚDE (TAB 2) ---
 function HealthTab() {
   const tips = [
-    {
-      id: '1',
-      icon: '👁️',
-      title: 'A Regra 20-20-20',
-      description: 'A cada 20 minutos olhando para a tela, olhe para algo a 6 metros (20 pés) de distância por pelo menos 20 segundos. Isso previne a fadiga ocular.'
-    },
-    {
-      id: '2',
-      icon: '🌙',
-      title: 'Luz Azul e Sono',
-      description: 'A luz azul emitida pelas telas inibe a produção de melatonina, o hormônio do sono. Evite telas 1 hora antes de dormir para um descanso profundo.'
-    },
-    {
-      id: '3',
-      icon: '🧠',
-      title: 'Desintoxicação de Dopamina',
-      description: 'Notificações constantes geram picos rápidos de dopamina, viciando o cérebro. Momentos offline ajudam a restaurar seu foco e atenção natural.'
-    },
-    {
-      id: '4',
-      icon: '🧘',
-      title: 'Postura e Respiração',
-      description: 'A "síndrome do pescoço de texto" inclina a cabeça e sobrecarrega a coluna. Faça pausas para alongar o pescoço e respirar fundo.'
-    }
+    { id: '1', icon: '👁️', title: 'A Regra 20-20-20', description: 'A cada 20 minutos olhando para a tela, olhe para algo a 6 metros por 20 segundos.' },
+    { id: '2', icon: '🌙', title: 'Luz Azul e Sono', description: 'A luz azul inibe a melatonina. Evite telas 1 hora antes de dormir.' },
+    { id: '3', icon: '🧠', title: 'Desintoxicação de Dopamina', description: 'Notificações geram picos rápidos de dopamina. Pausas restauram seu foco.' },
+    { id: '4', icon: '🧘', title: 'Postura e Respiração', description: 'Evite a "síndrome do pescoço de texto". Faça pausas para alongar.' }
   ];
 
   return (
@@ -283,9 +379,7 @@ function HealthTab() {
 }
 
 // --- NAVEGAÇÃO DE TABS ---
-function MainTabNavigator({ route }) {
-  const mascot = route.params?.mascot;
-
+function MainTabNavigator() {
   return (
     <Tab.Navigator 
       screenOptions={{ 
@@ -298,23 +392,18 @@ function MainTabNavigator({ route }) {
       <Tab.Screen 
         name="Desafios" 
         component={ChallengesTab} 
-        initialParams={{ mascot }}
-        options={{
-          tabBarIcon: ({ color }) => <Text style={{ fontSize: 20, color }}>🎯</Text>
-        }}
+        options={{ tabBarIcon: ({ color }) => <Text style={{ fontSize: 20, color }}>🎯</Text> }}
       />
       <Tab.Screen 
         name="Dicas de Saúde" 
         component={HealthTab} 
-        options={{
-          tabBarIcon: ({ color }) => <Text style={{ fontSize: 20, color }}>💡</Text>
-        }}
+        options={{ tabBarIcon: ({ color }) => <Text style={{ fontSize: 20, color }}>💡</Text> }}
       />
     </Tab.Navigator>
   );
 }
 
-// --- CONFIGURAÇÃO DE ROTAS RAIZ ---
+// --- ROTAS RAIZ ---
 export default function App() {
   return (
     <NavigationContainer>
@@ -331,16 +420,21 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F7F8F6' },
   content: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24 },
   scrollContent: { paddingHorizontal: 24, paddingTop: 40, paddingBottom: 40 },
-  iconContainer: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#E2E8E0', justifyContent: 'center', alignItems: 'center', marginBottom: 20 },
+  iconContainer: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#E2E8E0', justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
   iconText: { fontSize: 40 },
-  title: { fontSize: 24, fontWeight: '700', color: '#2C352E', marginBottom: 8, textAlign: 'center' },
-  subtitle: { fontSize: 14, color: '#6B7260', textAlign: 'center', marginBottom: 24, paddingHorizontal: 10 },
-  buttonGroup: { width: '100%', gap: 12 },
-  primaryButton: { backgroundColor: '#4A5D4E', paddingVertical: 16, borderRadius: 12, alignItems: 'center', width: '100%' },
-  primaryButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
+  title: { fontSize: 24, fontWeight: '700', color: '#2C352E', marginBottom: 6, textAlign: 'center' },
+  subtitle: { fontSize: 14, color: '#6B7260', textAlign: 'center', marginBottom: 24 },
+  
+  // Form de Login
+  formGroup: { width: '100%', gap: 10 },
+  inputLabel: { fontSize: 13, fontWeight: '600', color: '#2C352E', marginTop: 4 },
+  input: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#D0D7CE', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: '#2C352E' },
+
+  primaryButton: { backgroundColor: '#4A5D4E', paddingVertical: 15, borderRadius: 12, alignItems: 'center', width: '100%', marginTop: 8 },
+  primaryButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
   secondaryButton: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#D0D7CE', paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
   secondaryButtonText: { color: '#2C352E', fontSize: 14, fontWeight: '500' },
-  footerNote: { fontSize: 12, color: '#8A9285', marginTop: 32, textAlign: 'center' },
+  footerNote: { fontSize: 12, color: '#8A9285', marginTop: 28, textAlign: 'center' },
   
   // Onboarding
   sectionLabel: { fontSize: 16, fontWeight: '600', color: '#2C352E', marginBottom: 16, marginTop: 16 },
