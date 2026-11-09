@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ScrollView, Modal, Alert } from 'react-native';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ScrollView, Modal, Alert, AppState } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { registerUser, login, getSession, clearSession, migrateLegacyAuth } from './src/auth';
+import { saveActiveChallenge, loadActiveChallenge, clearActiveChallenge, secondsLeft } from './src/challenge';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -211,6 +212,24 @@ function ChallengesTab({ navigation }) {
     const session = await getSession();
     if (savedMascot) setMascotType(savedMascot);
     if (session) setUsername(session.username);
+
+    // Retomar um desafio que estava em andamento quando o app foi fechado.
+    try {
+      const saved = await loadActiveChallenge();
+      if (saved) {
+        const left = secondsLeft(saved);
+        if (left > 0) {
+          setActiveChallenge(saved);
+          setTimeLeft(left);
+        } else {
+          // Terminou enquanto o app estava fechado.
+          await clearActiveChallenge();
+          Alert.alert('Parabéns!', `Desafio "${saved.title}" concluído com sucesso!`);
+        }
+      }
+    } catch (e) {
+      console.log('Erro ao carregar desafio', e);
+    }
   };
 
   const handleLogout = async () => {
@@ -224,19 +243,49 @@ function ChallengesTab({ navigation }) {
   const challenges = [
     { id: '1', title: 'Fácil (1h)', duration: 3600, level: 'Fácil', desc: '1h longe das redes sociais' },
     { id: '2', title: 'Jantar sem Celular', duration: 7200, level: 'Médio', desc: '2h de refeição em família ou presença' },
-    { id: '3', title: '24h Offline Completo', duration: 86400, level: 'Difícil', desc: 'Um dia inteiro de reconexão real' }
+    { id: '3', title: '24h Offline Completo', duration: 86400, level: 'Difícil', desc: 'Um dia inteiro de reconexão real' },
+    // Só aparece em desenvolvimento (Expo Go), para testar sem esperar 1 hora.
+    ...(__DEV__ ? [{ id: 'dev', title: 'Teste rápido (1 min)', duration: 60, level: 'Dev', desc: 'Visível apenas em desenvolvimento' }] : [])
   ];
 
-  useEffect(() => {
-    let interval = null;
-    if (activeChallenge && timeLeft > 0) {
-      interval = setInterval(() => setTimeLeft((prev) => prev - 1), 1000);
-    } else if (timeLeft === 0 && activeChallenge) {
-      Alert.alert('Parabéns!', 'Desafio concluído com sucesso!');
-      setActiveChallenge(null);
+  const completeChallenge = async (challenge) => {
+    setShowReflectionModal(false);
+    setActiveChallenge(null);
+    try {
+      await clearActiveChallenge();
+    } catch (e) {
+      console.log('Erro ao limpar desafio', e);
     }
-    return () => clearInterval(interval);
-  }, [activeChallenge, timeLeft]);
+    // No iOS, um alerta mostrado enquanto o modal ainda está saindo pode não aparecer.
+    setTimeout(() => {
+      Alert.alert('Parabéns!', `Desafio "${challenge.title}" concluído com sucesso!`);
+    }, 600);
+  };
+
+  // O tempo restante vem sempre do relógio (horário de término salvo), então
+  // não "para" quando o app vai para segundo plano: ao voltar, recalcula na hora.
+  useEffect(() => {
+    if (!activeChallenge) return undefined;
+    let finished = false;
+    const tick = () => {
+      if (finished) return;
+      const left = secondsLeft(activeChallenge);
+      setTimeLeft(left);
+      if (left === 0) {
+        finished = true;
+        completeChallenge(activeChallenge);
+      }
+    };
+    tick();
+    const interval = setInterval(tick, 1000);
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') tick();
+    });
+    return () => {
+      clearInterval(interval);
+      subscription.remove();
+    };
+  }, [activeChallenge]);
 
   useEffect(() => {
     let interval = null;
@@ -246,9 +295,15 @@ function ChallengesTab({ navigation }) {
     return () => clearInterval(interval);
   }, [showReflectionModal, reflectionTimer]);
 
-  const startChallenge = (challenge) => {
-    setActiveChallenge(challenge);
-    setTimeLeft(challenge.duration);
+  const startChallenge = async (challenge) => {
+    if (activeChallenge) return;
+    try {
+      const saved = await saveActiveChallenge(challenge);
+      setActiveChallenge(saved);
+      setTimeLeft(secondsLeft(saved));
+    } catch (e) {
+      Alert.alert('Erro', 'Não foi possível iniciar o desafio. Tente novamente.');
+    }
   };
 
   const initiateCancel = () => {
@@ -256,7 +311,13 @@ function ChallengesTab({ navigation }) {
     setShowReflectionModal(true);
   };
 
-  const confirmCancel = () => {
+  const confirmCancel = async () => {
+    try {
+      await clearActiveChallenge();
+    } catch (e) {
+      Alert.alert('Erro', 'Não foi possível cancelar o desafio. Tente novamente.');
+      return;
+    }
     setShowReflectionModal(false);
     setActiveChallenge(null);
   };
