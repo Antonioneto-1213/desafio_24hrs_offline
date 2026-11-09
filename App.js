@@ -4,6 +4,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { registerUser, login, getSession, clearSession, migrateLegacyAuth } from './src/auth';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -13,6 +14,7 @@ function LoginScreen({ navigation }) {
   const [isRegistering, setIsRegistering] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
 
   // Carregar dados salvos ao iniciar (se já existir conta)
   useEffect(() => {
@@ -21,9 +23,11 @@ function LoginScreen({ navigation }) {
 
   const checkAutoLogin = async () => {
     try {
-      const userSession = await AsyncStorage.getItem('@user_session');
-      if (userSession) {
-        navigation.replace('MainTab', { username: JSON.parse(userSession).username });
+      // Converte contas da versão antiga (senha em texto puro) e apaga o texto puro.
+      await migrateLegacyAuth();
+      const session = await getSession();
+      if (session) {
+        navigation.replace('MainTab', { username: session.username });
       }
     } catch (e) {
       console.log('Erro ao ler sessão', e);
@@ -31,6 +35,7 @@ function LoginScreen({ navigation }) {
   };
 
   const handleAuth = async () => {
+    if (busy) return;
     if (!username.trim() || !password.trim()) {
       Alert.alert('Atenção', 'Por favor, preencha o nome de utilizador e a senha.');
       return;
@@ -41,31 +46,28 @@ function LoginScreen({ navigation }) {
       return;
     }
 
+    setBusy(true);
     try {
       if (isRegistering) {
-        // Registar utilizador
-        const userData = { username, password };
-        await AsyncStorage.setItem('@user_credentials', JSON.stringify(userData));
-        await AsyncStorage.setItem('@user_session', JSON.stringify({ username }));
+        // Registar utilizador (a senha é guardada só como hash com sal)
+        await registerUser(username, password);
         Alert.alert('Sucesso', 'Conta criada com sucesso!');
         navigation.replace('Onboarding');
       } else {
         // Fazer Login
-        const storedCredentials = await AsyncStorage.getItem('@user_credentials');
-        if (storedCredentials) {
-          const { username: savedUser, password: savedPassword } = JSON.parse(storedCredentials);
-          if (username === savedUser && password === savedPassword) {
-            await AsyncStorage.setItem('@user_session', JSON.stringify({ username }));
-            navigation.replace('MainTab', { username });
-          } else {
-            Alert.alert('Erro', 'Nome de utilizador ou senha incorretos.');
-          }
+        const result = await login(username, password);
+        if (result === 'ok') {
+          navigation.replace('MainTab', { username });
+        } else if (result === 'invalid') {
+          Alert.alert('Erro', 'Nome de utilizador ou senha incorretos.');
         } else {
           Alert.alert('Conta não encontrada', 'Nenhum utilizador registado neste dispositivo. Alterne para "Criar Conta".');
         }
       }
     } catch (e) {
       Alert.alert('Erro', 'Ocorreu um erro ao processar os dados.');
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -100,9 +102,13 @@ function LoginScreen({ navigation }) {
             onChangeText={setPassword}
           />
 
-          <TouchableOpacity style={styles.primaryButton} onPress={handleAuth}>
+          <TouchableOpacity
+            style={[styles.primaryButton, busy && { opacity: 0.5 }]}
+            onPress={handleAuth}
+            disabled={busy}
+          >
             <Text style={styles.primaryButtonText}>
-              {isRegistering ? 'Criar Conta e Entrar' : 'Entrar'}
+              {busy ? 'Aguarde...' : isRegistering ? 'Criar Conta e Entrar' : 'Entrar'}
             </Text>
           </TouchableOpacity>
 
@@ -202,13 +208,13 @@ function ChallengesTab({ navigation }) {
 
   const loadUserData = async () => {
     const savedMascot = await AsyncStorage.getItem('@user_mascot');
-    const userSession = await AsyncStorage.getItem('@user_session');
+    const session = await getSession();
     if (savedMascot) setMascotType(savedMascot);
-    if (userSession) setUsername(JSON.parse(userSession).username);
+    if (session) setUsername(session.username);
   };
 
   const handleLogout = async () => {
-    await AsyncStorage.removeItem('@user_session');
+    await clearSession();
     navigation.replace('Login');
   };
 
